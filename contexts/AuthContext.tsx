@@ -66,6 +66,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let isMounted = true
 
+    // Failsafe: liberar loading depois de 3s mesmo sem sessão (para GitHub Pages/export)
+    const failSafeTimer = setTimeout(() => {
+      if (isMounted) {
+        console.log('[AuthContext] FailSafe: liberando loading após timeout')
+        setLoading(false)
+      }
+    }, 3000)
+
     // Get initial session with retry logic
     const getInitialSession = async (retries = 3) => {
       try {
@@ -75,7 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (initialLoad || wasHardRefresh) {
           const delay = wasHardRefresh ? 300 : 100
           console.log(`Waiting ${delay}ms for Supabase client initialization...`)
-          await new Promise(resolve => setTimeout(resolve, delay))
+          await new Promise(r => setTimeout(r, delay))
         }
         
         const { data: { session }, error } = await supabase.auth.getSession()
@@ -83,7 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (!isMounted) return
         
         if (error) {
-          console.error('Error getting session:', error)
+          console.warn('[AuthContext] Erro ao obter sessão:', error.message)
           
           // Retry on error if we have attempts left
           if (retries > 0) {
@@ -100,28 +108,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (session && isSessionValid(session)) {
             setSession(session)
             setUser(session.user)
-          } else if (session && !isSessionValid(session)) {
-            console.log('Session expired, attempting refresh...')
-            // Try to refresh the session
-            supabase.auth.refreshSession()
           } else {
             setSession(null)
             setUser(null)
           }
         }
-      } catch (error) {
-        console.error('Error in getInitialSession:', error)
-        
-        if (!isMounted) return
-        
-        // Retry on error if we have attempts left
-        if (retries > 0) {
-          setTimeout(() => getInitialSession(retries - 1), 200)
-          return
-        }
-        
-        setSession(null)
-        setUser(null)
+      } catch (e) {
+        console.error('[AuthContext] Exceção getInitialSession:', e)
       } finally {
         if (isMounted) {
           setLoading(false)
@@ -134,33 +127,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
+      (event, session) => {
         if (!isMounted) return
         
-        console.log('Auth event:', event, session?.user?.email || 'No user')
-        
-        // Don't set loading to false immediately for hard refresh scenarios
-        if (!initialLoad) {
-          setLoading(false)
-        }
+        console.log('[AuthContext] Auth event:', event)
         
         switch (event) {
           case 'SIGNED_IN':
           case 'TOKEN_REFRESHED':
-            console.log(`User ${event.toLowerCase()}:`, session?.user?.email)
+          case 'INITIAL_SESSION':
             setSession(session)
             setUser(session?.user ?? null)
+            setLoading(false)
             break
           case 'SIGNED_OUT':
-            console.log('User signed out')
             setSession(null)
             setUser(null)
-            break
-          case 'INITIAL_SESSION':
-            // Handle initial session properly
-            console.log('Initial session event:', session?.user?.email || 'No user')
-            setSession(session)
-            setUser(session?.user ?? null)
+            setLoading(false)
             break
         }
       }
@@ -177,6 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       console.log('Cleaning up auth subscription and timers')
       isMounted = false
+      clearTimeout(failSafeTimer)
       subscription.unsubscribe()
       clearInterval(sessionCheckInterval)
     }
