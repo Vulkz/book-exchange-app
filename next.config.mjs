@@ -9,6 +9,10 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  output: 'export',
+  trailingSlash: true,
+  basePath: '/book-exchange-app',
+  assetPrefix: '/book-exchange-app/',
 }
 
 export default nextConfig
